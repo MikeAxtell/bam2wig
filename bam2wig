@@ -3,7 +3,7 @@ use Getopt::Std;
 use strict;
 use File::Basename;
 
-my $version = "0.1alpha"; 
+my $version = "0.1"; 
 my $usage = "bam2wig
 Version $version
 
