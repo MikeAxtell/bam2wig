@@ -67,6 +67,12 @@ OPTIONS
     -g [string] : Path to a GFF3 file. Loci in the GFF3 will be reported.
     Negates any setting of -c.
 
+    -D [string] : Name of output directory. Defaults to
+    [/YourBamsPath/YourBamsBasename_bam2wig/]
+
+    -m : Count each as (1/(n mapped reads)) * 1E6. In other words, normalize
+    to reads per million.
+
     -d : Treat as degradome/PARE data .. tally only the depths of 5' ends.
     Option -s must be either 'bottom' or 'top'
 

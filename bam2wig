@@ -7,7 +7,11 @@ use File::Basename;
 # - results now in an output directory
 # - remove dependency on samtools depth to calculate per-base depths due to hard-coded limit of 8000 by samtools depth
 
-my $version = "1.0"; 
+# 1.1 changes ..
+# add a switch, -m,  to calculate normalized reads to reads per million before calculating depths
+
+
+my $version = "1.1"; 
 my $usage = "bam2wig
 Version $version
 
@@ -26,6 +30,7 @@ OPTIONS:
 -L [integer] : Maximum size of read to report. Default: no maximum.
 -c [chr:start-stop] : Limit analysis to the indicated locus. 
 -g [string] : Path to a GFF3 file. Loci in the GFF3 will be reported. Negates any setting of -c.
+-m : Normalize reads to reads per million before calculating depths
 -d : Treat as degradome\/PARE data .. tally only the depths of 5' ends. Option -s must be either \'bottom\' or \'top\'
 -D : Name of output directory. Defaults to [/YourBamsPath/YourBamsBasename_bam2wig/].
 -h : Get help \(print this message\)
@@ -43,11 +48,11 @@ unless($ARGV[0]) {
 
 ########### Options
 
-our($opt_t,$opt_s,$opt_r,$opt_l,$opt_L,$opt_c,$opt_g,$opt_h,$opt_v,$opt_d,$opt_D);
+our($opt_t,$opt_s,$opt_r,$opt_l,$opt_L,$opt_c,$opt_g,$opt_h,$opt_v,$opt_d,$opt_D,$opt_m);
 $opt_t = 1; ## default
 $opt_s = "both"; ## default
 
-getopts('dhvt:s:r:l:L:c:g:D:');
+getopts('mdhvt:s:r:l:L:c:g:D:');
 
 if($opt_h) {
     die "$usage";
@@ -214,6 +219,10 @@ if($opt_d) {
     print STDERR "Degradome mode activated .. tally depths of 5' ends only\n";
 }
 
+if($opt_m) {
+    print STDERR "Reads normalized to reads per million mapped before calculating depths\n";
+}
+
 ## get loci organized and checked, if warranted
 my @loci = ();
 if($opt_c) {
@@ -270,6 +279,9 @@ if($opt_g) {
 if($opt_d) {
     $wigfile .= "-d";
 }
+if($opt_m) {
+    $wigfile .= "-m";
+}
 $wigfile .= ".wig";
 (open(WIG, "> $wigfile")) || die "Failed to open wiggle output file $wigfile for writing\n";
 
@@ -291,6 +303,17 @@ my $depthfile = "$opt_D" . "\/" . "$bamfilename" . "_depth.txt";
 #}
 #close HEADER;
 #################
+
+## If normalizing with option -m, get the number of aligned reads
+my $n_reads;
+if($opt_m) {
+    (open(READS, "samtools view -F 0x4 $bamfilepath | wc -l |")) || die "Failed to count reads in file\n";
+    $n_reads = <READS>;
+    close READS;
+    $n_reads =~ s/\s//g;
+    $n_reads =~ s/\n//g;
+    print STDERR "\nFound $n_reads mapped reads in file $bamfilepath\n";
+}
 
 (open(DEPTH, ">$depthfile")) || die "failed to open depth file $depthfile for writing\n";
 
@@ -344,7 +367,11 @@ if($loci_ok[0]) {
 		
 		# record info for current read                                                                                                                     
 		for (my $i = $sam_fields[3]; $i < ((length $sam_fields[9]) + $sam_fields[3]); ++$i) {
-		    ++$hash{$i};
+		    if($opt_m) {
+			$hash{$i} += ((1/$n_reads)*1E6);
+		    } else {
+			++$hash{$i};
+		    }
 		}
 		$last_chr = $sam_fields[2];
 	    }
@@ -389,7 +416,11 @@ if($loci_ok[0]) {
 	    }
 	    # record info for current read                                                                                                                     
 	    for (my $i = $sam_fields[3]; $i < ((length $sam_fields[9]) + $sam_fields[3]); ++$i) {
-		++$hash{$i};
+		if($opt_m) {
+		    $hash{$i} += ((1/$n_reads)*1E6);
+		} else {
+		    ++$hash{$i};
+		}
 	    }
 	    $last_chr = $sam_fields[2];
 	}
@@ -796,6 +827,10 @@ bam2wig [options] [alignments.bam]
 -c [chr:start-stop] : Limit analysis to the indicated locus. 
 
 -g [string] : Path to a GFF3 file. Loci in the GFF3 will be reported. Negates any setting of -c.
+
+-D [string] : Name of output directory. Defaults to [/YourBamsPath/YourBamsBasename_bam2wig/]
+
+-m : Count each as (1/(n mapped reads)) * 1E6. In other words, normalize to reads per million.
 
 -d : Treat as degradome/PARE data .. tally only the depths of 5' ends. Option -s must be either 'bottom' or 'top'
 
