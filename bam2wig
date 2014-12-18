@@ -3,7 +3,11 @@ use Getopt::Std;
 use strict;
 use File::Basename;
 
-my $version = "0.2"; 
+# 1.0 changes .. 
+# - results now in an output directory
+# - remove dependency on samtools depth to calculate per-base depths due to hard-coded limit of 8000 by samtools depth
+
+my $version = "1.0"; 
 my $usage = "bam2wig
 Version $version
 
@@ -23,6 +27,7 @@ OPTIONS:
 -c [chr:start-stop] : Limit analysis to the indicated locus. 
 -g [string] : Path to a GFF3 file. Loci in the GFF3 will be reported. Negates any setting of -c.
 -d : Treat as degradome\/PARE data .. tally only the depths of 5' ends. Option -s must be either \'bottom\' or \'top\'
+-D : Name of output directory. Defaults to [/YourBamsPath/YourBamsBasename_bam2wig/].
 -h : Get help \(print this message\)
 -v : Print version number and quit
 
@@ -38,11 +43,11 @@ unless($ARGV[0]) {
 
 ########### Options
 
-our($opt_t,$opt_s,$opt_r,$opt_l,$opt_L,$opt_c,$opt_g,$opt_h,$opt_v,$opt_d);
+our($opt_t,$opt_s,$opt_r,$opt_l,$opt_L,$opt_c,$opt_g,$opt_h,$opt_v,$opt_d,$opt_D);
 $opt_t = 1; ## default
 $opt_s = "both"; ## default
 
-getopts('dhvt:s:r:l:L:c:g:');
+getopts('dhvt:s:r:l:L:c:g:D:');
 
 if($opt_h) {
     die "$usage";
@@ -124,6 +129,19 @@ if($opt_d) {
     }
 }
 
+# do the output directory last
+my $bamfilepath = pop @ARGV;
+my ($bamfilename,$bamfilejustpath,$bamfilesuffix) = fileparse($bamfilepath,qr/\.[^.]*/);
+if($opt_D) {
+    # do nothing
+} else {
+    $opt_D = "$bamfilejustpath" . "$bamfilename" . "_bam2wig";
+}
+# create directory if needed
+unless(-d $opt_D) {
+    system "mkdir $opt_D";
+}
+
 ########### Report on run initiation
 
 print STDERR "\nbam2wig version $version\n";
@@ -158,9 +176,9 @@ if($w2bw_check) {
 }
 
 
-my $bamfilepath = pop @ARGV;
+
 print STDERR "BAM file: $bamfilepath\n";
-my ($bamfilename,$bamfilejustpath,$bamfilesuffix) = fileparse($bamfilepath,qr/\.[^.]*/);
+print STDERR "Output Directory: $opt_D\n";
 my ($chrs,$chr_lens,$read_groups) = checkbam($bamfilepath);  ### references to arrays are returned from this sub-routine
 print STDERR "Threshold: $opt_t reads
 Strand: $opt_s\n";
@@ -219,12 +237,11 @@ if($loci[0]) {
 
 
 
-
 ############ Write the wiggle file
 print STDERR "\nPhase One: Generating depths\n";
 
 # open the WIG output stream
-my $wigfile = "$bamfilename";
+my $wigfile = "$opt_D" . "\/" . "$bamfilename";
 # Add notes to the file name if there were non-default options
 if($opt_t != 1) {
     $wigfile .= "-t$opt_t";
@@ -257,20 +274,25 @@ $wigfile .= ".wig";
 (open(WIG, "> $wigfile")) || die "Failed to open wiggle output file $wigfile for writing\n";
 
 # open a BAM --> depth output stream
-my $depthfile = "$bamfilename" . "_depth.txt";
-# degradome mode for bottom strand is a special case where the bam needs to be re-sorted...
-if(($opt_d) and ($opt_s eq "bottom")) {
-    (open(DEPTH, "| samtools view -S -b - 2> /dev/null | samtools sort -o - tempbam 2> /dev/null | samtools depth /dev/stdin 2> /dev/null > $depthfile")) || die "failed to open samtools depth stream\n";
-} else {
-    (open(DEPTH, "| samtools view -S -b - 2> /dev/null | samtools depth /dev/stdin 2> /dev/null > $depthfile")) || die "failed to open samtools depth stream\n";
-}
+my $depthfile = "$opt_D" . "\/" . "$bamfilename" . "_depth.txt";
 
+########## DEFUNCT
+# degradome mode for bottom strand is a special case where the bam needs to be re-sorted...
+#if(($opt_d) and ($opt_s eq "bottom")) {
+#    (open(DEPTH, "| samtools view -S -b - 2> /dev/null | samtools sort -o - tempbam 2> /dev/null | samtools depth /dev/stdin 2> /dev/null > $depthfile")) || die "failed to open samtools depth stream\n";
+#} else {
+#    (open(DEPTH, "| samtools view -S -b - 2> /dev/null | samtools depth /dev/stdin 2> /dev/null > $depthfile")) || die "failed to open samtools depth stream\n";
+#}
+#
 # feed in the header
-(open(HEADER, "samtools view -H $bamfilepath |")) || die "failed to open header of $bamfilepath\n";
-while (<HEADER>) {
-    print DEPTH "$_";
-}
-close HEADER;
+#(open(HEADER, "samtools view -H $bamfilepath |")) || die "failed to open header of $bamfilepath\n";
+#while (<HEADER>) {
+#    print DEPTH "$_";
+#}
+#close HEADER;
+#################
+
+(open(DEPTH, ">$depthfile")) || die "failed to open depth file $depthfile for writing\n";
 
 my $view_call = "samtools view";
 # strand
@@ -290,8 +312,15 @@ if($opt_r) {
 # add the bamfile
 $view_call .= " $bamfilepath";
 
+
+# initialize variables
 my @sam_fields = ();
 my $sam_out;
+my $last_chr = "NULL";
+my %hash = ();
+my @sorted = ();
+my $pos;
+
 if($loci_ok[0]) {
     # multiple queries
     my $view_call_temp;
@@ -302,30 +331,84 @@ if($loci_ok[0]) {
 	while (<SAM>) {
 	    $sam_out = check_sam($_);
 	    if($sam_out) {
-		print DEPTH "$sam_out";
+		# no header                                                                                                                                        
+		if($_ =~ /^\@/) {
+		    next;
+		}
+		chomp;
+		@sam_fields = split ("\t", $_);
+		# no unmapped reads                                                                                                                                
+		if($sam_fields[1] & 4) {
+		    next;
+		}
+		
+		# record info for current read                                                                                                                     
+		for (my $i = $sam_fields[3]; $i < ((length $sam_fields[9]) + $sam_fields[3]); ++$i) {
+		    ++$hash{$i};
+		}
+		$last_chr = $sam_fields[2];
 	    }
 	}
 	close SAM;
+	@sorted = sort {$a <=> $b} keys %hash;
+	foreach $pos (@sorted) {
+	    print DEPTH "$last_chr\t";
+	    print DEPTH "$pos\t";
+	    print DEPTH "$hash{$pos}\n";
+	}
+	%hash = ();
     }
 } else {
     # single query
     (open(SAM, "$view_call |")) || die "Failed to open view_call $view_call\n";
-    ## only have to go line by line if we are filtering by RNA size
     while (<SAM>) {
 	$sam_out = check_sam($_);
 	if($sam_out) {
-	    print DEPTH "$sam_out";
-	    # test
-	    #print "\nsam_out:\n$sam_out";
+	    # no header                                                                                                                                        
+	    if($_ =~ /^\@/) {
+		next;
+	    }
+	    chomp;
+	    @sam_fields = split ("\t", $_);
+	    # no unmapped reads                                                                                                                                
+	    if($sam_fields[1] & 4) {
+		next;
+	    }
+	    
+	    if($sam_fields[2] ne $last_chr) {
+		unless($last_chr eq "NULL") {
+		    # flush all entries from the last chr                                                                                                      
+		    @sorted = sort {$a <=> $b} keys %hash;
+		    foreach $pos (@sorted) {
+			print DEPTH "$last_chr\t";
+			print DEPTH "$pos\t";
+			print DEPTH "$hash{$pos}\n";
+		    }
+		    %hash = ();
+		}
+	    }
+	    # record info for current read                                                                                                                     
+	    for (my $i = $sam_fields[3]; $i < ((length $sam_fields[9]) + $sam_fields[3]); ++$i) {
+		++$hash{$i};
+	    }
+	    $last_chr = $sam_fields[2];
 	}
     }
     close SAM;
+    # final flush for last chr
+    @sorted = sort {$a <=> $b} keys %hash;
+    foreach $pos (@sorted) {
+	print DEPTH "$last_chr\t";
+	print DEPTH "$pos\t";
+	print DEPTH "$hash{$pos}\n";
+    }
+    %hash = ();
 }
 close DEPTH;
 print STDERR "\nPhase Two: Processing depths\n";
 
-# initialize variables
-my $last_chr = "NULL";
+# (re)initialize variables
+$last_chr = "NULL";
 my $last_depth;
 my $last_position;
 my $last_initial_position;
