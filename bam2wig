@@ -10,8 +10,9 @@ use File::Basename;
 # 1.1 changes ..
 # add a switch, -m,  to calculate normalized reads to reads per million before calculating depths
 
+# 1.2 .. fixed option -t so that it defaults to 0, and no longer requires integers.
 
-my $version = "1.1"; 
+my $version = "1.2"; 
 my $usage = "bam2wig
 Version $version
 
@@ -23,7 +24,7 @@ samtools [in PATH]
 wigToBigWig [in PATH -- optional]
 
 OPTIONS:
--t [integer] : Threshold for reporting. Defaults to 1 (all depths reported)
+-t [float] : Threshold for reporting. Defaults to 0 (all depths reported)
 -s [top/bottom/both] : Strand to report. Defaults to both. 'bottom' will quantify in negative numbers. Used in conjunction with option -g will subset the loci to those on the indicated strand.
 -r [string] : Limit analysis to specified read group
 -l [integer] : Minimum size of read to report. Default: no minimum.
@@ -49,7 +50,7 @@ unless($ARGV[0]) {
 ########### Options
 
 our($opt_t,$opt_s,$opt_r,$opt_l,$opt_L,$opt_c,$opt_g,$opt_h,$opt_v,$opt_d,$opt_D,$opt_m);
-$opt_t = 1; ## default
+$opt_t = 0; ## default
 $opt_s = "both"; ## default
 
 getopts('mdhvt:s:r:l:L:c:g:D:');
@@ -68,14 +69,8 @@ unless(-r $ARGV[-1]) {
 
 ### Validate options
 
-if($opt_t =~ /^\d+$/) {
-    if($opt_t >= 1) {
-	# do nothing
-    } else {
-	die "FATAL: Option -t must be an integer >= 1\n";
-    }
-} else {
-    die "FATAL: Option -t must be an integer >= 1\n";
+unless($opt_t >= 0) {
+    die "FATAL: Invalid value for option -t. It must be a number of 0 or more\n";
 }
 
 unless(($opt_s eq "both") or
@@ -185,7 +180,7 @@ if($w2bw_check) {
 print STDERR "BAM file: $bamfilepath\n";
 print STDERR "Output Directory: $opt_D\n";
 my ($chrs,$chr_lens,$read_groups) = checkbam($bamfilepath);  ### references to arrays are returned from this sub-routine
-print STDERR "Threshold: $opt_t reads
+print STDERR "Threshold: $opt_t read depth
 Strand: $opt_s\n";
 print STDERR "Read Group: ";
 if($opt_r) {
@@ -252,7 +247,7 @@ print STDERR "\nPhase One: Generating depths\n";
 # open the WIG output stream
 my $wigfile = "$opt_D" . "\/" . "$bamfilename";
 # Add notes to the file name if there were non-default options
-if($opt_t != 1) {
+if($opt_t != 0) {
     $wigfile .= "-t$opt_t";
 }
 if($opt_s ne "both") {
@@ -814,7 +809,7 @@ bam2wig [options] [alignments.bam]
 
 =head1 OPTIONS
 
--t [integer] : Threshold for reporting. Defaults to 1 (all depths reported)
+-t [float] : Threshold for reporting. Defaults to 0 (all depths reported)
 
 -s [top/bottom/both] : Strand to report. Defaults to both. 'bottom' will quantify in negative numbers. Used in conjunction with option -g will subset the loci to those on the indicated strand.
 

@@ -49,7 +49,7 @@ USAGE
     bam2wig [options] [alignments.bam]
 
 OPTIONS
-    -t [integer] : Threshold for reporting. Defaults to 1 (all depths
+    -t [float] : Threshold for reporting. Defaults to 0 (all depths
     reported)
 
     -s [top/bottom/both] : Strand to report. Defaults to both. 'bottom' will
