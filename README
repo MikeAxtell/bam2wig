@@ -5,7 +5,7 @@ SYNOPSIS
     flexible reporting options.
 
 LICENSE
-    Copyright (C) 2014-2015 Michael J. Axtell
+    Copyright (C) 2014-2016 Michael J. Axtell
 
     This program is free software: you can redistribute it and/or modify it
     under the terms of the GNU General Public License as published by the
@@ -80,6 +80,9 @@ OPTIONS
 
     -d : Treat as degradome/PARE data .. tally only the depths of 5' ends.
     Option -s must be either 'bottom' or 'top'
+
+    -i : Instead of reporting abundance, report instead the FRACTIONS of
+    reads that meet the size requirements set by -l and/or -L
 
     -h : Get help (print this message)
 

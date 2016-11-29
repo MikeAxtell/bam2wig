@@ -14,7 +14,9 @@ use File::Basename;
 
 # 1.3 .. added -F option to ignore classes of reads based on SAM FLAG (e.g. Secondary alignments, etc)
 
-my $version = "1.3"; 
+# 1.4 .. added -i switch to report fraction of reads within a given size range, instead of coverage
+
+my $version = "1.4"; 
 my $usage = "bam2wig
 Version $version
 
@@ -37,6 +39,7 @@ OPTIONS:
 -m : Normalize reads to reads per million before calculating depths
 -d : Treat as degradome\/PARE data .. tally only the depths of 5' ends. Option -s must be either \'bottom\' or \'top\'
 -D : Name of output directory. Defaults to [/YourBamsPath/YourBamsBasename_bam2wig/].
+-i : Instead of abundance, instead report fraction of reads meeting the size requirements given by -l and/or -L
 -h : Get help \(print this message\)
 -v : Print version number and quit
 
@@ -52,12 +55,12 @@ unless($ARGV[0]) {
 
 ########### Options
 
-our($opt_t,$opt_s,$opt_r,$opt_l,$opt_L,$opt_c,$opt_g,$opt_h,$opt_v,$opt_d,$opt_D,$opt_m,$opt_F);
+our($opt_t,$opt_s,$opt_r,$opt_l,$opt_L,$opt_c,$opt_g,$opt_h,$opt_v,$opt_d,$opt_D,$opt_m,$opt_F,$opt_i);
 $opt_t = 0; ## default
 $opt_s = "both"; ## default
 $opt_F = 3844;  ## default .. sum of 4 (unmapped reads), 256 (secondary alignments), 512 (failed QC), 1024 (Duplicate), 2048 (supplementary)
 
-getopts('mdhvt:s:r:l:L:c:g:D:F:');
+getopts('mdhvit:s:r:l:L:c:g:D:F:');
 
 if($opt_h) {
     die "$usage";
@@ -117,6 +120,15 @@ if($opt_L) {
 if(($opt_l) and ($opt_L)) {
     unless($opt_l <= $opt_L) {
 	die "FATAL: Option l must be less than or equal to option L\n";
+    }
+}
+
+if($opt_i) {
+    unless(($opt_l) or ($opt_L)) {
+	die "FATAL: Switch -i requires specifying -l, -L, or both.\n";
+    }
+    if($opt_d) {
+	die "FATAL: Switch -i is not compatible with degradome mode \(switch -d\)\n";
     }
 }
 
@@ -232,6 +244,10 @@ if($opt_m) {
     print STDERR "Reads normalized to reads per million mapped before calculating depths\n";
 }
 
+if($opt_i) {
+    print STDERR "\nNOTE: i mode engaged. Track shows FRACTIONS of reads meeting sizes specified by -l and/or -L\n";
+}
+
 ## get loci organized and checked, if warranted
 my @loci = ();
 if($opt_c) {
@@ -292,7 +308,10 @@ if($opt_m) {
     $wigfile .= "-m";
 }
 if($opt_F != 3844) {
-	$wigfile .= "-F$opt_F";
+    $wigfile .= "-F$opt_F";
+}
+if($opt_i) {
+    $wigfile .= "-i";
 }
 $wigfile .= ".wig";
 (open(WIG, "> $wigfile")) || die "Failed to open wiggle output file $wigfile for writing\n";
@@ -352,10 +371,12 @@ $view_call .= " $bamfilepath";
 # initialize variables
 my @sam_fields = ();
 my $sam_out;
+my $iok;
 my $last_chr = "NULL";
 my %hash = ();
 my @sorted = ();
 my $pos;
+my %ihash = ();
 
 if($loci_ok[0]) {
     # multiple queries
@@ -365,7 +386,7 @@ if($loci_ok[0]) {
 	$view_call_temp .= " $lo";
 	(open(SAM, "$view_call_temp |")) || die "Failed to open view_call $view_call_temp\n";
 	while (<SAM>) {
-	    $sam_out = check_sam($_);
+	    ($sam_out,$iok) = check_sam($_);
 	    if($sam_out) {
 		# no header                                                                                                                                        
 		if($_ =~ /^\@/) {
@@ -382,10 +403,25 @@ if($loci_ok[0]) {
 		for (my $i = $sam_fields[3]; $i < ((length $sam_fields[9]) + $sam_fields[3]); ++$i) {
 		    if($opt_m) {
 			$hash{$i} += ((1/$n_reads)*1E6);
+			if($opt_i) {
+			    if($iok) {
+				$ihash{$i} += ((1/$n_reads)*1E6);
+			    } else {
+				$ihash{$i} += 0;
+			    }
+			}
 		    } else {
 			++$hash{$i};
+			if($opt_i) {
+			    if($iok) {
+				++$ihash{$i};
+			    } else {
+				$ihash{$i} += 0;
+			    }
+			}
 		    }
 		}
+		
 		$last_chr = $sam_fields[2];
 	    }
 	}
@@ -394,15 +430,21 @@ if($loci_ok[0]) {
 	foreach $pos (@sorted) {
 	    print DEPTH "$last_chr\t";
 	    print DEPTH "$pos\t";
-	    print DEPTH "$hash{$pos}\n";
+	    if($opt_i) {
+		my $ifrac = sprintf("%.2f", ($ihash{$pos} / $hash{$pos}));
+		print DEPTH "$ifrac\n";
+	    } else {
+		print DEPTH "$hash{$pos}\n";
+	    }
 	}
 	%hash = ();
+	%ihash = ();
     }
 } else {
     # single query
     (open(SAM, "$view_call |")) || die "Failed to open view_call $view_call\n";
     while (<SAM>) {
-	$sam_out = check_sam($_);
+	($sam_out,$iok) = check_sam($_);
 	if($sam_out) {
 	    # no header                                                                                                                                        
 	    if($_ =~ /^\@/) {
@@ -422,17 +464,37 @@ if($loci_ok[0]) {
 		    foreach $pos (@sorted) {
 			print DEPTH "$last_chr\t";
 			print DEPTH "$pos\t";
-			print DEPTH "$hash{$pos}\n";
+			if($opt_i) {
+			    my $ifrac = sprintf("%.2f", ($ihash{$pos} / $hash{$pos}));
+			    print DEPTH "$ifrac\n";
+			} else {
+			    print DEPTH "$hash{$pos}\n";
+			}
 		    }
 		    %hash = ();
+		    %ihash = ();
 		}
 	    }
 	    # record info for current read                                                                                                                     
 	    for (my $i = $sam_fields[3]; $i < ((length $sam_fields[9]) + $sam_fields[3]); ++$i) {
 		if($opt_m) {
 		    $hash{$i} += ((1/$n_reads)*1E6);
+		    if($opt_i) {
+			if($iok) {
+			    $ihash{$i} += ((1/$n_reads)*1E6);
+			} else {
+			    $ihash{$i} += 0;
+			}
+		    }
 		} else {
 		    ++$hash{$i};
+		    if($opt_i) {
+			if($iok) {
+			    ++$ihash{$i};
+			} else {
+			    $ihash{$i} += 0;
+			}
+		    }
 		}
 	    }
 	    $last_chr = $sam_fields[2];
@@ -444,9 +506,15 @@ if($loci_ok[0]) {
     foreach $pos (@sorted) {
 	print DEPTH "$last_chr\t";
 	print DEPTH "$pos\t";
-	print DEPTH "$hash{$pos}\n";
+	if($opt_i) {
+	    my $ifrac = sprintf("%.2f", ($ihash{$pos} / $hash{$pos}));
+	    print DEPTH "$ifrac\n";
+	} else {
+	    print DEPTH "$hash{$pos}\n";
+	}
     }
     %hash = ();
+    %ihash = ();
 }
 close DEPTH;
 print STDERR "\nPhase Two: Processing depths\n";
@@ -578,29 +646,29 @@ exit;
 # SUB-ROUTINES
 sub check_sam {
     my($samline) = @_;
+    my $iok = 0;
     unless(($opt_l) or ($opt_L) or ($opt_d)) {
-	return $samline;
+	return ($samline,$iok);
     }
     my @fields = split ("\t", $samline);
-    
-    # test
-    #print STDERR "in check_sam, length is ";
-    #my $xxx = length $fields[9];
-    #print STDERR "$xxx\n";
     
     my $newseq;
     if($opt_l) {
 	if((length $fields[9]) < $opt_l) {
-	    # test
-	    #print STDERR "\tFailed less than opt_l $opt_l\n";
-	    return 0;
+	    if($opt_i) {
+		return($samline,$iok);  ## iline is set to 0 here
+	    } else {
+		return (0,0);
+	    }
 	}
     }
     if($opt_L) {
 	if((length $fields[9]) > $opt_L) {
-	    # test
-	    #print STDERR "\tFailed more than than opt_L $opt_L\n";
-	    return 0;
+	    if($opt_i) {
+		return($samline,$iok); ## iline is set to 0 here
+	    } else {
+		return (0,0);
+	    }
 	}
     }
     if($opt_d) {
@@ -614,21 +682,22 @@ sub check_sam {
 	    $rc =~ tr/ACTG/TGAC/;
 	    $newseq = substr($rc,0,1);
 	    $samline .= "$newseq\t\*\n";
-	    return $samline;
+	    return ($samline,0);
 	} else {
 	    # plus strand process
 	    $samline = "$fields[0]\t$fields[1]\t$fields[2]\t$fields[3]\t255\t1M\t\*\t0\t0\t";
 	    # seq is the first letter
 	    $newseq = substr($fields[9],0,1);
 	    $samline .= "$newseq\t\*\n";
-	    return $samline;
+	    return ($samline,0);
 	}
     } else {
-	# if not degradome, must have passed the opt_l and/or opt_L filters already, so return it
-	return $samline;
+	# if here must have passed the opt_l and/or opt_L filters already, so return it and set iline as well
+	$iok = 1;
+	return ($samline,$iok);
     }
     # why are you here?
-    return 0;
+    return (0,0);
 }
 
 sub sort_loci {
@@ -786,7 +855,7 @@ Conversion of a BAM alignment to wiggle and bigwig coverage files, with flexible
 
 =head1 LICENSE
 
-Copyright (C) 2014-2015 Michael J. Axtell                                                                                                                                                           
+Copyright (C) 2014-2016 Michael J. Axtell                                                                                                                                                           
                                                                                                                                                                                                      
 This program is free software: you can redistribute it and/or modify                                                                                                                                 
 it under the terms of the GNU General Public License as published by                                                                                                                                 
@@ -850,6 +919,8 @@ and 2048 (Supplementary alignments)
 -m : Count each as (1/(n mapped reads)) * 1E6. In other words, normalize to reads per million.
 
 -d : Treat as degradome/PARE data .. tally only the depths of 5' ends. Option -s must be either 'bottom' or 'top'
+
+-i : Instead of reporting abundance, report instead the FRACTIONS of reads that meet the size requirements set by -l and/or -L
 
 -h : Get help (print this message)
 
