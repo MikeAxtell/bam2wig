@@ -16,7 +16,10 @@ use File::Basename;
 
 # 1.4 .. added -i switch to report fraction of reads within a given size range, instead of coverage
 
-my $version = "1.4"; 
+# 1.5 .. wiggle file counts, when floating points, are now rounded to three decimal places. Save space in final file.
+#        This means that, in -m mode, the lowest reported value will be 0.001 reads per million.
+
+my $version = "1.5"; 
 my $usage = "bam2wig
 Version $version
 
@@ -434,7 +437,8 @@ if($loci_ok[0]) {
 		my $ifrac = sprintf("%.2f", ($ihash{$pos} / $hash{$pos}));
 		print DEPTH "$ifrac\n";
 	    } else {
-		print DEPTH "$hash{$pos}\n";
+		my $rounded = sprintf("%.2f", $hash{$pos});
+		print DEPTH "$rounded\n";
 	    }
 	}
 	%hash = ();
@@ -468,7 +472,8 @@ if($loci_ok[0]) {
 			    my $ifrac = sprintf("%.2f", ($ihash{$pos} / $hash{$pos}));
 			    print DEPTH "$ifrac\n";
 			} else {
-			    print DEPTH "$hash{$pos}\n";
+			    my $rounded = sprintf("%.2f", $hash{$pos});
+			    print DEPTH "$rounded\n";
 			}
 		    }
 		    %hash = ();
@@ -510,7 +515,8 @@ if($loci_ok[0]) {
 	    my $ifrac = sprintf("%.2f", ($ihash{$pos} / $hash{$pos}));
 	    print DEPTH "$ifrac\n";
 	} else {
-	    print DEPTH "$hash{$pos}\n";
+	    my $rounded = sprintf("%.2f", $hash{$pos});
+	    print DEPTH "$rounded\n";
 	}
     }
     %hash = ();
@@ -855,7 +861,7 @@ Conversion of a BAM alignment to wiggle and bigwig coverage files, with flexible
 
 =head1 LICENSE
 
-Copyright (C) 2014-2016 Michael J. Axtell                                                                                                                                                           
+Copyright (C) 2014-2018 Michael J. Axtell                                                                                                                                                           
                                                                                                                                                                                                      
 This program is free software: you can redistribute it and/or modify                                                                                                                                 
 it under the terms of the GNU General Public License as published by                                                                                                                                 
