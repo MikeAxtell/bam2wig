@@ -19,7 +19,9 @@ use File::Basename;
 # 1.5 .. wiggle file counts, when floating points, are now rounded to three decimal places. Save space in final file.
 #        This means that, in -m mode, the lowest reported value will be 0.001 reads per million.
 
-my $version = "1.5"; 
+# 1.6 .. bug fix for degradome mode
+
+my $version = "1.6"; 
 my $usage = "bam2wig
 Version $version
 
@@ -395,8 +397,8 @@ if($loci_ok[0]) {
 		if($_ =~ /^\@/) {
 		    next;
 		}
-		chomp;
-		@sam_fields = split ("\t", $_);
+		chomp $sam_out;
+		@sam_fields = split ("\t", $sam_out);
 		# no unmapped reads                                                                                                                                
 		if($sam_fields[1] & 4) {
 		    next;
@@ -454,8 +456,8 @@ if($loci_ok[0]) {
 	    if($_ =~ /^\@/) {
 		next;
 	    }
-	    chomp;
-	    @sam_fields = split ("\t", $_);
+	    chomp $sam_out;
+	    @sam_fields = split ("\t", $sam_out);
 	    # no unmapped reads                                                                                                                                
 	    if($sam_fields[1] & 4) {
 		next;
@@ -652,6 +654,10 @@ exit;
 # SUB-ROUTINES
 sub check_sam {
     my($samline) = @_;
+
+    ## testing
+    #print "\nReceived samline $samline\n";
+
     my $iok = 0;
     unless(($opt_l) or ($opt_L) or ($opt_d)) {
 	return ($samline,$iok);
@@ -688,6 +694,11 @@ sub check_sam {
 	    $rc =~ tr/ACTG/TGAC/;
 	    $newseq = substr($rc,0,1);
 	    $samline .= "$newseq\t\*\n";
+	    
+	    # testing 
+	    #print "\tReturning modified line $samline\n";
+	    # exit;
+	    
 	    return ($samline,0);
 	} else {
 	    # plus strand process
@@ -695,6 +706,11 @@ sub check_sam {
 	    # seq is the first letter
 	    $newseq = substr($fields[9],0,1);
 	    $samline .= "$newseq\t\*\n";
+
+	    # testing 
+	    #print "\tReturning modified line $samline\n";
+	    # exit;
+
 	    return ($samline,0);
 	}
     } else {
